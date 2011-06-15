@@ -17,6 +17,8 @@ if !exists('snips_author') | let snips_author = 'Me' | endif
 
 if (!exists('g:snipMateSources'))
   let g:snipMateSources = {}
+  " default source: get snippets based on runtimepath:
+  let g:snipMateSources['default'] = funcref#Function('snipMate#DefaultPool')
 endif
 
 au BufRead,BufNewFile *.snippets\= set ft=snippet
@@ -29,6 +31,11 @@ endif
 let s:snipMate = g:snipMate
 
 let s:snipMate['get_snippets'] = get(s:snipMate, 'get_snippets', funcref#Function("snipMate#GetSnippets"))
+
+" old snippets_dir: function returning list of paths which is used to read
+" snippets. You can replace it with your own implementation. Defaults to all
+" directories in &rtp/snippets/*
+let s:snipMate['snippet_dirs'] = get(s:snipMate, 'snippets_dirs', funcref#Function('return split(&runtimepath,",")'))
 
 if !exists('snippets_dir')
 	let snippets_dir = substitute(globpath(&rtp, 'snippets/'), "\n", ',', 'g')
@@ -78,16 +85,15 @@ fun! TriggerSnippet()
 	if exists('g:snipPos') | return snipMate#jumpTabStop(0) | endif
 
 	let word = matchstr(getline('.'), '\S\+\%'.col('.').'c')
-	for scope in [bufnr('%')] + split(&ft, '\.') + ['_']
-		let [trigger, snippet] = s:GetSnippet(word, scope)
-		" If word is a trigger for a snippet, delete the trigger & expand
-		" the snippet.
-		if snippet != ''
-			let col = col('.') - len(trigger)
-			sil exe 's/\V'.escape(trigger, '/\.').'\%#//'
-			return snipMate#expandSnip(snippet, col)
-		endif
-	endfor
+	let [trigger, snippet] = s:GetSnippet(word)
+	" If word is a trigger for a snippet, delete the trigger & expand
+	" the snippet.
+	if snippet != ''
+		let &undolevels = &undolevels " create new undo point
+		let col = col('.') - len(trigger)
+		sil exe 's/\V'.escape(trigger, '/\.').'\%#//'
+		return snipMate#expandSnip(snippet, col)
+	endif
 
 	if exists('SuperTabKey')
 		call feedkeys(SuperTabKey)
@@ -125,12 +131,29 @@ fun! BackwardsSnippet()
 	return "\<s-tab>"
 endf
 
-" Check if word under cursor is snippet trigger; if it isn't, try checking if
-" the text after non-word characters is (e.g. check for "foo" in "bar.foo")
-fun! s:GetSnippet(word, scope)
-	let word = a:word | let snippet = ''
-	while snippet == ''
-		let snippetD = get(snipMate#GetSnippets([a:scope], word),word, {})
+" Check if the word under the cursor is a snippet trigger.
+" If it is not, it gets split by non-word characters and looked up in
+" parts, e.g. 'foo' in 'bar.foo'.
+fun! s:GetSnippet(word)
+	let snippet = ''
+	let lookups = [a:word] " lookup whole word always and first, e.g. '$_'
+	let parts = split(a:word, '\W\zs')
+	if len(parts) > 2
+		let parts = parts[-2:] " max 2 additional items, this might become a setting
+	endif
+	" Setup lookups: '1.2.3' becomes [1.2.3] + [3, 2.3]
+	let lookup = ''
+	for w in reverse(parts)
+		let lookup = w . lookup
+		if lookup == a:word
+			break
+		endif
+		let lookups += [lookup]
+	endfor
+	" prefer longest word
+	for word in lookups
+		" echomsg string(lookups).' current: '.word
+		let snippetD = get(funcref#Call(s:snipMate['get_snippets'], [split(&ft, '\.') + ['_'], word.'*']), word, {})
 		if !empty(snippetD)
 			let s = s:ChooseSnippet(snippetD)
 			if type(s) == type([])
@@ -138,14 +161,11 @@ fun! s:GetSnippet(word, scope)
 			else
 				let snippet = s
 			end
-			if snippet == '' | break | endif
-		else
-			if match(word, '\W\w') == -1 | break | endif
-			let word = substitute(word, '.\{-}\W', '', '')
+			if snippet != '' | break | endif
 		endif
-	endw
+	endfor
 	if word == '' && a:word != '.' && stridx(a:word, '.') != -1
-		let [word, snippet] = s:GetSnippet('.', a:scope)
+		let [word, snippet] = s:GetSnippet('.')
 	endif
 	return [word, snippet]
 endf
@@ -184,7 +204,9 @@ fun! ShowAvailableSnips()
 	endif
 	let matchlen = 0
 	let matches = []
-	let snips = snipMate#GetSnippets([bufnr('%')] + split(&ft, '\.') + ['_'], word.'*')
+	let snips = funcref#Call(s:snipMate['get_snippets'], [split(&ft, '\.') + ['_'], word.'*'])
+
+
 	for trigger in keys(snips)
 		for word in words
 			if word == ''

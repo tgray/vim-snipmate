@@ -2,6 +2,8 @@ snippet php
 	<?php
 	${1}
 	?>
+snippet phpil
+	<?php ${1} ?>
 snippet ec
 	echo "${1:string}"${2};
 snippet inc
@@ -15,6 +17,8 @@ snippet req1
 # $GLOBALS['...']
 snippet globals
 	$GLOBALS['${1:variable}']${2: = }${3:something}${4:;}${5}
+snippet G
+	$GLOBALS['${1:variable}']
 snippet $_ COOKIE['...']
 	$_COOKIE['${1:variable}']${2}
 snippet $_ ENV['...']
@@ -236,3 +240,8 @@ snippet pdd
 	echo '<pre>'; var_dump(${1}); echo '</pre>'; die(${2:});
 snippet vd
 	var_dump(${1});
+
+snippet http_redirect
+	header ("HTTP/1.1 301 Moved Permanently"); 
+	header ("Location: ".URL); 
+	exit();
